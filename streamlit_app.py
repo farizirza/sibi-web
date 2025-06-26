@@ -311,7 +311,7 @@ def main():
         st.session_state.camera_capture_active = False
 
     # Main interface tabs
-    tab1, tab3, tab4 = st.tabs(["📷 Live Detection","�📁 Upload Image", "ℹ️ About"])
+    tab1, tab3, tab4 = st.tabs(["📷 Live Detection", "📁 Upload Image", "ℹ️ About"])
     
     with tab1:
         st.header("📷 Live Camera Detection")
@@ -464,7 +464,7 @@ def main():
             - Adjust confidence and stability thresholds in the sidebar
             - The word timeout controls spacing between words
             """)
-
+            
     with tab3:
         st.header("📁 Upload Image")
         st.markdown("Upload an image containing SIBI sign language")
