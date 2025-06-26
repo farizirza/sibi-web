@@ -303,8 +303,15 @@ def main():
     detector.word_timeout = word_timeout
     detector.stable_threshold = stable_threshold
 
+    # Function to stop all camera activities when switching tabs
+    def stop_all_cameras():
+        if detector.cap:
+            detector.stop_camera()
+        st.session_state.live_detection_active = False
+        st.session_state.camera_capture_active = False
+
     # Main interface tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["📷 Live Detection", "📸 Camera Capture", "📁 Upload Image", "ℹ️ About"])
+    tab1, tab3, tab4 = st.tabs(["📷 Live Detection","�📁 Upload Image", "ℹ️ About"])
     
     with tab1:
         st.header("📷 Live Camera Detection")
@@ -315,6 +322,16 @@ def main():
             st.session_state.live_detection_active = False
         if 'sentence_history' not in st.session_state:
             st.session_state.sentence_history = []
+        if 'current_tab' not in st.session_state:
+            st.session_state.current_tab = 0
+        if 'camera_capture_active' not in st.session_state:
+            st.session_state.camera_capture_active = False
+
+        # Stop camera capture when entering Live Detection tab
+        if st.session_state.camera_capture_active:
+            st.session_state.camera_capture_active = False
+            if detector.cap:
+                detector.stop_camera()
 
         # Control buttons
         col1, col2, col3 = st.columns(3)
@@ -448,121 +465,16 @@ def main():
             - The word timeout controls spacing between words
             """)
 
-    with tab2:
-        st.header("📸 Camera Capture")
-        st.markdown("**Take photos for SIBI detection and sentence building**")
-
-        # Camera input
-        st.subheader("📷 Camera Feed")
-        camera_input = st.camera_input(
-            "Position your hand to show SIBI signs",
-            help="Take a photo to detect SIBI signs"
-        )
-
-        if camera_input is not None:
-            # Process the captured image
-            image = Image.open(camera_input)
-            image_array = np.array(image)
-
-            # Make prediction using detector
-            result_image, prediction, confidence = process_image(
-                detector, image_array, confidence_threshold
-            )
-
-            # Display results in columns with smaller images
-            col1, col2 = st.columns(2)
-
-            with col1:
-                st.subheader("📷 Original")
-                st.image(image, width=300)
-
-            with col2:
-                st.subheader("🎯 Detection Result")
-                st.image(result_image, width=300)
-
-            # Prediction results
-            st.subheader("📊 Detection Results")
-
-            if prediction and confidence > confidence_threshold:
-                # Success case
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.success(f"**Detected:** {prediction}")
-                with col2:
-                    st.info(f"**Confidence:** {confidence:.1%}")
-                with col3:
-                    st.metric("Score", f"{confidence:.1%}")
-
-                # Progress bar
-                st.progress(confidence, text=f"Confidence: {confidence:.1%}")
-
-                # Add to sentence button
-                if st.button("➕ Add to Sentence", key="add_to_sentence"):
-                    detector.add_word_to_sentence(prediction)
-                    st.success(f"Added '{prediction}' to sentence!")
-                    st.rerun()
-
-                # Detailed info
-                with st.expander("📋 Detection Details"):
-                    st.json({
-                        'prediction': prediction,
-                        'confidence': confidence,
-                        'threshold': confidence_threshold,
-                        'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
-                        'status': 'detected'
-                    })
-            else:
-                # No detection case
-                st.warning("👀 No SIBI sign detected above threshold")
-                if prediction:
-                    st.info(f"Low confidence detection: {prediction} ({confidence:.1%})")
-
-                with st.expander("� Detection Details"):
-                    st.json({
-                        'prediction': prediction or 'None',
-                        'confidence': confidence,
-                        'threshold': confidence_threshold,
-                        'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
-                        'status': 'below_threshold'
-                    })
-
-            # Show current sentence
-            sentence_info = detector.get_sentence_info()
-            if sentence_info['sentence']:
-                st.subheader("📝 Current Sentence")
-                st.success(f"**Sentence:** {sentence_info['sentence']}")
-                st.info(f"**Word Count:** {sentence_info['word_count']}")
-
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("💾 Save Sentence", key="save_sentence_capture"):
-                        st.session_state.sentence_history.append({
-                            'sentence': sentence_info['sentence'],
-                            'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
-                            'word_count': sentence_info['word_count']
-                        })
-                        st.success("Sentence saved!")
-                with col2:
-                    if st.button("🗑️ Clear Sentence", key="clear_sentence_capture"):
-                        detector.clear_sentence()
-                        st.rerun()
-        else:
-            # Instructions when no camera input
-            st.info("👆 Click the camera button above to capture and detect SIBI signs")
-            st.markdown("""
-            **Instructions:**
-            1. Click the camera button to open your camera
-            2. Position your hand with a SIBI sign
-            3. Take the photo
-            4. View the detection results below
-            5. Use "Add to Sentence" to build sentences word by word
-
-            **Current sentence will be displayed below the detection results.**
-            """)
-
     with tab3:
         st.header("📁 Upload Image")
         st.markdown("Upload an image containing SIBI sign language")
+
+        # Stop all camera activities when entering this tab
+        if st.session_state.live_detection_active or st.session_state.camera_capture_active:
+            st.session_state.live_detection_active = False
+            st.session_state.camera_capture_active = False
+            if detector.cap:
+                detector.stop_camera()
         
         uploaded_file = st.file_uploader(
             "Choose an image file", 
@@ -645,6 +557,13 @@ def main():
     
     with tab4:
         st.header("ℹ️ About SIBI Detector")
+
+        # Stop all camera activities when entering this tab
+        if st.session_state.live_detection_active or st.session_state.camera_capture_active:
+            st.session_state.live_detection_active = False
+            st.session_state.camera_capture_active = False
+            if detector.cap:
+                detector.stop_camera()
 
         st.markdown("""
         ### 🤟 Sistem Isyarat Bahasa Indonesia (SIBI)
