@@ -8,6 +8,12 @@ from PIL import Image
 import tempfile
 import os
 from collections import deque
+import threading
+import queue
+
+# Import streamlit-webrtc components
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
+import av
 
 # Page config
 st.set_page_config(
@@ -17,6 +23,14 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# WebRTC configuration for better connectivity
+RTC_CONFIGURATION = RTCConfiguration({
+    "iceServers": [
+        {"urls": ["stun:stun.l.google.com:19302"]},
+        {"urls": ["stun:stun1.l.google.com:19302"]},
+    ]
+})
+
 class SIBIStreamlitDetector:
     def __init__(self, model_path='models/sibiv3.pt'):
         """
@@ -24,12 +38,10 @@ class SIBIStreamlitDetector:
         """
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        # Initialize camera and model
-        self.cap = None
+        # Initialize model
         self.model = None
         self.current_prediction = None
         self.current_confidence = 0.0
-        self.is_running = False
 
         # Load the model
         try:
@@ -51,28 +63,14 @@ class SIBIStreamlitDetector:
         self.stable_detection_count = 0
         self.stable_threshold = 3  # need 3 stable detections to add word
 
-    def start_camera(self):
-        """Start camera capture"""
-        if self.cap is None:
-            self.cap = cv2.VideoCapture(0)
-            if not self.cap.isOpened():
-                raise Exception("Could not open camera")
-            # Set camera properties for better performance and smaller size
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 480)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
-            self.cap.set(cv2.CAP_PROP_FPS, 30)
-        self.is_running = True
+        # Thread-safe variables for WebRTC
+        self.lock = threading.Lock()
+        self.latest_frame = None
+        self.detection_results = queue.Queue(maxsize=10)
 
-    def stop_camera(self):
-        """Stop camera capture"""
-        self.is_running = False
-        if self.cap:
-            self.cap.release()
-            self.cap = None
-        
     def predict(self, frame):
         """
-        Make prediction on the frame using YOLO (same as Flask version)
+        Make prediction on the frame using YOLO
         """
         try:
             results = self.model(frame, verbose=False)
@@ -96,12 +94,11 @@ class SIBIStreamlitDetector:
                 return None, 0.0, None
         
         except Exception as e:
-            st.error(f"Prediction error: {e}")
             return None, 0.0, None
     
     def smooth_predictions(self, prediction, confidence):
         """
-        Smooth predictions using history to reduce noise (same as Flask version)
+        Smooth predictions using history to reduce noise
         """
         if confidence > self.confidence_threshold:
             self.prediction_history.append(prediction)
@@ -160,16 +157,16 @@ class SIBIStreamlitDetector:
 
     def draw_info(self, frame, prediction, confidence, bbox=None):
         """
-        Draw prediction information on frame with sentence building
+        Draw prediction information on frame with smaller, compact display
         """
-        width = frame.shape[1]
+        height, width = frame.shape[:2]
 
         # Draw bounding box if available
         if bbox is not None:
             x1, y1, x2, y2 = bbox.astype(int)
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-        # Draw prediction info
+        # Draw prediction info with smaller box
         if prediction is not None and confidence > self.confidence_threshold:
             # Get class name from model
             class_names = self.model.names
@@ -185,42 +182,38 @@ class SIBIStreamlitDetector:
             if self.stable_detection_count >= self.stable_threshold:
                 self.add_word_to_sentence(label)
 
-            # Background for text (larger for sentence)
-            cv2.rectangle(frame, (10, 10), (min(width-10, 600), 150), (0, 0, 0), -1)
+            # Smaller background for text - reduced height from 150 to 90
+            cv2.rectangle(frame, (10, 10), (min(width-10, 350), 90), (0, 0, 0), -1)
 
-            # Current prediction text
-            cv2.putText(frame, f"Current: {label}",
-                       (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            cv2.putText(frame, f"Confidence: {confidence:.2f}",
-                       (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            # Current prediction text - smaller font size
+            cv2.putText(frame, f"{label}",
+                       (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(frame, f"{confidence:.2f}",
+                       (15, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-            # Sentence text
+            # Compact sentence text
             sentence_text = self.current_sentence if self.current_sentence else "..."
-            if len(sentence_text) > 40:  # Truncate long sentences
-                sentence_text = sentence_text[:37] + "..."
-            cv2.putText(frame, f"Sentence: {sentence_text}",
-                       (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
-
-            # Stability indicator
-            stability_text = f"Stability: {self.stable_detection_count}/{self.stable_threshold}"
-            cv2.putText(frame, stability_text,
-                       (20, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 2)
+            if len(sentence_text) > 25:  # Shorter truncation
+                sentence_text = sentence_text[:22] + "..."
+            cv2.putText(frame, f"S: {sentence_text}",
+                       (15, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
 
             # Update current prediction for display
             self.current_prediction = label
             self.current_confidence = confidence
         else:
-            cv2.rectangle(frame, (10, 10), (400, 100), (0, 0, 0), -1)
+            # Smaller "No detection" box
+            cv2.rectangle(frame, (10, 10), (200, 60), (0, 0, 0), -1)
             cv2.putText(frame, "No detection",
-                       (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                       (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
-            # Still show sentence if available
+            # Still show sentence if available - compact version
             if self.current_sentence:
                 sentence_text = self.current_sentence
-                if len(sentence_text) > 40:
-                    sentence_text = sentence_text[:37] + "..."
-                cv2.putText(frame, f"Sentence: {sentence_text}",
-                           (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+                if len(sentence_text) > 20:
+                    sentence_text = sentence_text[:17] + "..."
+                cv2.putText(frame, f"S: {sentence_text}",
+                           (15, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
 
             # Reset stability counter
             self.stable_detection_count = 0
@@ -237,6 +230,35 @@ def load_detector():
     except Exception as e:
         st.error(f"Failed to initialize detector: {e}")
         return None
+
+def video_frame_callback(frame, detector):
+    """
+    Callback function for processing video frames from WebRTC
+    """
+    img = frame.to_ndarray(format="bgr24")
+    
+    # Flip frame horizontally for mirror effect
+    img = cv2.flip(img, 1)
+    
+    # Make prediction
+    prediction, confidence, bbox = detector.predict(img)
+    smoothed_prediction = detector.smooth_predictions(prediction, confidence)
+    
+    # Draw information on frame
+    annotated_frame = detector.draw_info(img, smoothed_prediction, confidence, bbox)
+    
+    # Store latest results for UI updates (thread-safe)
+    try:
+        detector.detection_results.put_nowait({
+            'prediction': smoothed_prediction,
+            'confidence': confidence,
+            'timestamp': time.time()
+        })
+    except queue.Full:
+        pass  # Skip if queue is full
+    
+    # Convert back to av.VideoFrame
+    return av.VideoFrame.from_ndarray(annotated_frame, format="bgr24")
 
 def process_image(detector, image_array, confidence_threshold):
     """Process image and return results"""
@@ -303,144 +325,126 @@ def main():
     detector.word_timeout = word_timeout
     detector.stable_threshold = stable_threshold
 
-    # Function to stop all camera activities when switching tabs
-    def stop_all_cameras():
-        if detector.cap:
-            detector.stop_camera()
-        st.session_state.live_detection_active = False
-        st.session_state.camera_capture_active = False
+    # Initialize session state
+    if 'sentence_history' not in st.session_state:
+        st.session_state.sentence_history = []
 
     # Main interface tabs
-    tab1, tab3, tab4 = st.tabs(["📷 Live Detection", "📁 Upload Image", "ℹ️ About"])
+    tab1, tab2, tab3 = st.tabs(["📷 Live Detection", "📁 Upload Image", "ℹ️ About"])
     
     with tab1:
         st.header("📷 Live Camera Detection")
-        st.markdown("**Real-time SIBI detection with sentence building**")
-
-        # Initialize session state for live detection
-        if 'live_detection_active' not in st.session_state:
-            st.session_state.live_detection_active = False
-        if 'sentence_history' not in st.session_state:
-            st.session_state.sentence_history = []
-        if 'current_tab' not in st.session_state:
-            st.session_state.current_tab = 0
-        if 'camera_capture_active' not in st.session_state:
-            st.session_state.camera_capture_active = False
-
-        # Stop camera capture when entering Live Detection tab
-        if st.session_state.camera_capture_active:
-            st.session_state.camera_capture_active = False
-            if detector.cap:
-                detector.stop_camera()
+        st.markdown("**Real-time SIBI detection with sentence building using WebRTC**")
 
         # Control buttons
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1:
-            if st.button("🎥 Start Live Detection", type="primary"):
-                st.session_state.live_detection_active = True
-                detector.clear_sentence()
-        with col2:
-            if st.button("⏹️ Stop Detection"):
-                st.session_state.live_detection_active = False
-        with col3:
             if st.button("🗑️ Clear Sentence"):
                 detector.clear_sentence()
                 st.rerun()
+        with col2:
+            # Save sentence button
+            sentence_info = detector.get_sentence_info()
+            if sentence_info['sentence'] and st.button("💾 Save Sentence"):
+                st.session_state.sentence_history.append({
+                    'sentence': sentence_info['sentence'],
+                    'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
+                    'word_count': sentence_info['word_count']
+                })
+                st.success("Sentence saved to history!")
 
-        # Live detection area
-        if st.session_state.live_detection_active:
-            st.info("🔴 Live detection is active. Position your hand to show SIBI signs.")
+        # Create layout with smaller camera
+        col1, col2 = st.columns([1, 2])  # Camera smaller (1/3), info larger (2/3)
+        
+        with col1:
+            st.subheader("📹 Camera")
+            # Create WebRTC streamer with custom styling
+            webrtc_ctx = webrtc_streamer(
+                key="sibi-detection",
+                mode=WebRtcMode.SENDRECV,
+                rtc_configuration=RTC_CONFIGURATION,
+                video_frame_callback=lambda frame: video_frame_callback(frame, detector),
+                media_stream_constraints={
+                    "video": {
+                        "width": {"ideal": 320},
+                        "height": {"ideal": 240}
+                    }, 
+                    "audio": False
+                },
+                async_processing=True,
+            )
+        
+        with col2:
+            st.subheader("📊 Detection Results")
+            detection_placeholder = st.empty()
+            
+            st.subheader("📝 Current Sentence")
+            sentence_placeholder = st.empty()
 
-            # Create layout with smaller video feed
-            col1, col2 = st.columns([1, 2])  # Video smaller (1/3), info larger (2/3)
-
-            with col1:
-                st.subheader("📹 Live Feed")
-                video_placeholder = st.empty()
-
-            with col2:
-                st.subheader("📊 Detection Results")
-                sentence_placeholder = st.empty()
-                stats_placeholder = st.empty()
-
-            # Start camera capture
-            try:
-                detector.start_camera()
-
-                # Live detection loop
-                frame_count = 0
-                while st.session_state.live_detection_active and frame_count < 100:  # Limit frames to prevent infinite loop
-                    ret, frame = detector.cap.read()
-                    if not ret:
-                        st.error("Failed to read from camera")
-                        break
-
-                    # Flip frame horizontally for mirror effect
-                    frame = cv2.flip(frame, 1)
-
-                    # Make prediction
-                    prediction, confidence, bbox = detector.predict(frame)
-                    smoothed_prediction = detector.smooth_predictions(prediction, confidence)
-
-                    # Draw information on frame
-                    annotated_frame = detector.draw_info(frame, smoothed_prediction, confidence, bbox)
-
-                    # Convert to RGB for display
-                    frame_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
-
-                    # Update video display with fixed width
-                    video_placeholder.image(frame_rgb, channels="RGB", width=320)
-
+        # Update detection results in real-time
+        if webrtc_ctx.state.playing:
+            st.success("🔴 Live detection is active. Position your hand clearly in the camera view.")
+            
+            # Continuously update results
+            while webrtc_ctx.state.playing:
+                try:
+                    # Get latest detection results
+                    result = detector.detection_results.get(timeout=0.1)
+                    
+                    with detection_placeholder.container():
+                        if result['prediction'] and result['confidence'] > confidence_threshold:
+                            # Compact metrics display
+                            st.metric("🎯 Current Sign", result['prediction'])
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.metric("📊 Confidence", f"{result['confidence']:.1%}")  
+                            with col2:
+                                st.metric("⚡ Stability", f"{detector.stable_detection_count}/{detector.stable_threshold}")
+                        else:
+                            st.warning("⌛ Waiting for detection...")
+                    
                     # Update sentence display
                     sentence_info = detector.get_sentence_info()
                     with sentence_placeholder.container():
                         if sentence_info['sentence']:
-                            st.success(f"**Current Sentence:** {sentence_info['sentence']}")
-                            st.info(f"**Word Count:** {sentence_info['word_count']}")
+                            st.success(f"**📝 Sentence:** {sentence_info['sentence']}")
+                            st.info(f"**📊 Words:** {sentence_info['word_count']}")
+                            
+                            # Show last few words
+                            if sentence_info['last_words']:
+                                recent_words = [w['word'] for w in sentence_info['last_words']]
+                                st.text(f"Recent: {' → '.join(recent_words)}")
                         else:
-                            st.warning("No sentence built yet. Show SIBI signs to start building.")
-
-                    # Update statistics
-                    with stats_placeholder.container():
-                        if smoothed_prediction and confidence > confidence_threshold:
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("Current Sign", smoothed_prediction)
-                            with col2:
-                                st.metric("Confidence", f"{confidence:.1%}")
-                            with col3:
-                                st.metric("Stability", f"{detector.stable_detection_count}/{detector.stable_threshold}")
-
-                    frame_count += 1
-                    time.sleep(0.1)  # Small delay to prevent overwhelming
-
-                detector.stop_camera()
-
-            except Exception as e:
-                st.error(f"Camera error: {e}")
-                st.session_state.live_detection_active = False
-                if detector.cap:
-                    detector.stop_camera()
+                            st.info("💡 Show SIBI signs to start building sentences")
+                            
+                except queue.Empty:
+                    time.sleep(0.1)
+                    continue
+                except:
+                    break
         else:
-            st.info("👆 Click 'Start Live Detection' to begin real-time SIBI detection with sentence building.")
+            with col2:
+                st.info("""
+                👆 Click **Start** button in the camera section to begin detection.
+                
+                **Note**: Allow camera access when prompted by your browser.
+                """)
+                
+                # Show current sentence even when not active
+                sentence_info = detector.get_sentence_info()
+                if sentence_info['sentence']:
+                    st.success(f"**Last Sentence:** {sentence_info['sentence']}")
+                    st.info(f"**Word Count:** {sentence_info['word_count']}")
 
-            # Show current sentence even when not active
-            sentence_info = detector.get_sentence_info()
-            if sentence_info['sentence']:
-                st.success(f"**Last Built Sentence:** {sentence_info['sentence']}")
-
-                # Save sentence button
-                if st.button("💾 Save Sentence"):
-                    st.session_state.sentence_history.append({
-                        'sentence': sentence_info['sentence'],
-                        'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
-                        'word_count': sentence_info['word_count']
-                    })
-                    st.success("Sentence saved to history!")
+        # Show current sentence even when not active
+        sentence_info = detector.get_sentence_info()
+        if sentence_info['sentence'] and not webrtc_ctx.state.playing:
+            st.success(f"**Last Built Sentence:** {sentence_info['sentence']}")
 
         # Sentence history
         if st.session_state.sentence_history:
-            st.subheader("� Sentence History")
+            st.subheader("📚 Sentence History")
             for i, entry in enumerate(reversed(st.session_state.sentence_history[-10:])):  # Show last 10
                 with st.expander(f"Sentence {len(st.session_state.sentence_history)-i}: {entry['sentence'][:50]}..."):
                     st.write(f"**Full Sentence:** {entry['sentence']}")
@@ -451,30 +455,29 @@ def main():
         with st.expander("📖 How to Use Live Detection"):
             st.markdown("""
             **Instructions for Live Detection:**
-            1. Click "Start Live Detection" to activate the camera
-            2. Position your hand clearly in front of the camera
-            3. Hold each SIBI sign steady for a few seconds
-            4. The system will automatically add detected signs to build a sentence
-            5. Use "Clear Sentence" to start over
-            6. Use "Save Sentence" to store completed sentences
+            1. Click "Start" to activate the camera feed
+            2. Allow camera access when prompted by your browser
+            3. Position your hand clearly in front of the camera
+            4. Hold each SIBI sign steady for a few seconds
+            5. The system will automatically add detected signs to build a sentence
+            6. Use "Clear Sentence" to start over
+            7. Use "Save Sentence" to store completed sentences
 
             **Tips:**
             - Ensure good lighting for better detection
             - Hold signs steady for the stability threshold duration
             - Adjust confidence and stability thresholds in the sidebar
             - The word timeout controls spacing between words
+            
+            **Browser Compatibility:**
+            - Works best with Chrome, Firefox, Safari, and Edge
+            - Requires HTTPS for camera access in production
+            - May need to refresh if camera doesn't start
             """)
             
-    with tab3:
+    with tab2:
         st.header("📁 Upload Image")
         st.markdown("Upload an image containing SIBI sign language")
-
-        # Stop all camera activities when entering this tab
-        if st.session_state.live_detection_active or st.session_state.camera_capture_active:
-            st.session_state.live_detection_active = False
-            st.session_state.camera_capture_active = False
-            if detector.cap:
-                detector.stop_camera()
         
         uploaded_file = st.file_uploader(
             "Choose an image file", 
@@ -555,34 +558,28 @@ def main():
                         detector.clear_sentence()
                         st.rerun()
     
-    with tab4:
+    with tab3:
         st.header("ℹ️ About SIBI Detector")
-
-        # Stop all camera activities when entering this tab
-        if st.session_state.live_detection_active or st.session_state.camera_capture_active:
-            st.session_state.live_detection_active = False
-            st.session_state.camera_capture_active = False
-            if detector.cap:
-                detector.stop_camera()
 
         st.markdown("""
         ### 🤟 Sistem Isyarat Bahasa Indonesia (SIBI)
 
-        This enhanced Streamlit application provides advanced SIBI detection with sentence building capabilities:
+        This Streamlit application provides advanced SIBI detection with sentence building capabilities using WebRTC for real-time camera access.
 
-        ### ✨ New Features
-        - **🎥 Live Camera Detection** - Real-time continuous video streaming
+        ### ✨ Features
+        - **🎥 WebRTC Live Detection** - Real-time video streaming that works in deployed apps
         - **📝 Sentence Building** - Automatic word-to-sentence construction
         - **📚 Sentence History** - Save and manage detected sentences
         - **⚙️ Advanced Settings** - Configurable stability and timing parameters
-        - **📸 Multiple Input Methods** - Live camera, photo capture, and file upload
+        - **📸 Multiple Input Methods** - Live camera and file upload
+        - **🌐 Cloud Compatible** - Works on deployed Streamlit apps with HTTPS
 
         ### 🔧 Technology Stack
         - **Model**: Ultralytics YOLO v8 for SIBI detection
         - **Backend**: PyTorch for deep learning inference
-        - **Frontend**: Streamlit for interactive web interface
+        - **Frontend**: Streamlit with streamlit-webrtc for camera access
         - **Computer Vision**: OpenCV for image processing
-        - **Real-time Processing**: Optimized for live video streams
+        - **Real-time Processing**: WebRTC for low-latency video streaming
 
         ### 📊 Detection Features
         - **Prediction Smoothing** - Reduces noise with history-based filtering
@@ -592,11 +589,18 @@ def main():
         - **Real-time Statistics** - Live confidence and stability metrics
 
         ### 🎯 How It Works
-        1. **Detection**: YOLO model identifies SIBI signs in real-time
-        2. **Smoothing**: Multiple consistent detections reduce false positives
-        3. **Stability**: Words are added only after stable detection periods
-        4. **Sentence Building**: Detected words are automatically combined with timing logic
-        5. **History**: Completed sentences are saved for review and export
+        1. **Video Capture**: WebRTC streams video directly from your browser
+        2. **Detection**: YOLO model identifies SIBI signs in real-time
+        3. **Smoothing**: Multiple consistent detections reduce false positives
+        4. **Stability**: Words are added only after stable detection periods
+        5. **Sentence Building**: Detected words are automatically combined with timing logic
+        6. **History**: Completed sentences are saved for review and export
+
+        ### 🌐 Deployment Benefits
+        - **Browser Compatibility**: Works across modern browsers
+        - **No Local Dependencies**: Camera access through web standards
+        - **HTTPS Support**: Secure camera access in production
+        - **Cross-Platform**: Works on desktop and mobile devices
         """)
 
         # Model information
@@ -637,22 +641,34 @@ def main():
             - Use "Clear Sentence" to start over
             - Save important sentences to history
             - Adjust stability threshold for accuracy vs speed
+
+            **Browser Setup:**
+            - Allow camera permissions when prompted
+            - Use Chrome, Firefox, Safari, or Edge for best compatibility
+            - Ensure stable internet connection for smooth streaming
+            - Refresh page if camera doesn't start immediately
             """)
 
-        # Performance info
-        with st.expander("⚡ Performance Information"):
+        # Technical information
+        with st.expander("⚡ Technical Information"):
             st.markdown("""
-            **Live Detection Performance:**
-            - Optimized for real-time processing
-            - Automatic frame rate adjustment
-            - Memory-efficient video streaming
+            **WebRTC Implementation:**
+            - Real-time peer-to-peer video streaming
+            - Low-latency processing pipeline
+            - Automatic frame rate optimization
+            - Thread-safe detection results handling
+
+            **Performance Optimizations:**
+            - Async video processing
+            - Queue-based result updates
+            - Memory-efficient frame handling
             - GPU acceleration when available
 
-            **System Requirements:**
-            - Python 3.7+
-            - Webcam/camera access
-            - 4GB+ RAM recommended
-            - GPU optional but recommended for better performance
+            **Deployment Requirements:**
+            - HTTPS required for camera access in production
+            - streamlit-webrtc package for WebRTC functionality
+            - Modern browser with WebRTC support
+            - Stable internet connection
             """)
 
 if __name__ == "__main__":
