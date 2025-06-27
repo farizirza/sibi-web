@@ -32,7 +32,7 @@ RTC_CONFIGURATION = RTCConfiguration({
 })
 
 class SIBIStreamlitDetector:
-    def __init__(self, model_path='models/sibiv3.pt'):
+    def __init__(self, model_path='models/sibiv1.pt'):
         """
         Initialize SIBI detector for Streamlit with sentence building capability
         """
@@ -51,7 +51,7 @@ class SIBIStreamlitDetector:
             raise Exception(f"Failed to load model: {e}")
 
         # Detection parameters
-        self.confidence_threshold = 0.5
+        self.confidence_threshold = 0.3
         self.prediction_history = []
         self.history_size = 5
 
@@ -59,7 +59,7 @@ class SIBIStreamlitDetector:
         self.detected_words = deque(maxlen=50)  # Store last 50 detected words
         self.current_sentence = ""
         self.last_detection_time = 0
-        self.word_timeout = 2.0  # seconds between words
+        self.word_timeout = 1.5  # seconds between words
         self.stable_detection_count = 0
         self.stable_threshold = 3  # need 3 stable detections to add word
 
