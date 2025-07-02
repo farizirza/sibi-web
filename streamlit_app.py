@@ -32,10 +32,9 @@ RTC_CONFIGURATION = RTCConfiguration({
 })
 
 class SIBIStreamlitDetector:
-    def __init__(self, model_path='models/sibi11mv1.pt'):
+    def __init__(self, model_path='models/sibi11sv1.pt'):
         """
         Inisialisasi detektor SIBI untuk Streamlit dengan kemampuan membangun kalimat
-        Diperbarui menggunakan model sibi11mv1.pt dengan kosakata yang diperluas
         """
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -241,7 +240,7 @@ class SIBIStreamlitDetector:
 
 @st.cache_resource
 def load_detector():
-    """Muat detektor dengan caching - menggunakan model sibi11mv1.pt terbaru"""
+    """Muat detektor dengan caching - menggunakan model sibi11sv1.pt terbaru"""
     try:
         return SIBIStreamlitDetector()
     except Exception as e:
@@ -584,7 +583,7 @@ def main():
         - **🌐 Kompatibel Cloud** - Bekerja di aplikasi Streamlit yang di-deploy dengan HTTPS
 
         ### 🔧 Stack Teknologi
-        - **Model**: Ultralytics YOLO v8 untuk deteksi SIBI (sibi11mv1.pt - Versi Terbaru)
+        - **Model**: Ultralytics YOLO v11s untuk deteksi SIBI
         - **Backend**: PyTorch untuk inferensi deep learning
         - **Frontend**: Streamlit dengan streamlit-webrtc untuk akses kamera
         - **Computer Vision**: OpenCV untuk pemrosesan gambar
@@ -620,7 +619,7 @@ def main():
             with col1:
                 st.write(f"**Device**: {detector.device}")
                 st.write(f"**Tipe Model**: Ultralytics YOLO")
-                st.write(f"**Versi Model**: sibi11mv1.pt")
+                st.write(f"**Versi Model**: sibi11sv1.pt")
                 st.write(f"**Kelas**: {len(detector.model.names)} kelas")
             with col2:
                 st.write(f"**Ambang Batas Confidence**: {confidence_threshold}")
