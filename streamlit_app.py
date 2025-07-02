@@ -32,10 +32,10 @@ RTC_CONFIGURATION = RTCConfiguration({
 })
 
 class SIBIStreamlitDetector:
-    def __init__(self, model_path='models/sibi11sv1.pt'):
+    def __init__(self, model_path='models/sibi11mv1.pt'):
         """
         Inisialisasi detektor SIBI untuk Streamlit dengan kemampuan membangun kalimat
-        Diperbarui menggunakan model sibi11sv1.pt dengan kosakata yang diperluas
+        Diperbarui menggunakan model sibi11mv1.pt dengan kosakata yang diperluas
         """
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -52,7 +52,7 @@ class SIBIStreamlitDetector:
             raise Exception(f"Gagal memuat model: {e}")
 
         # Parameter deteksi
-        self.confidence_threshold = 0.3
+        self.confidence_threshold = 0.5
         self.prediction_history = []
         self.history_size = 5
 
@@ -124,11 +124,15 @@ class SIBIStreamlitDetector:
 
         # Cek apakah waktu yang cukup telah berlalu sejak deteksi terakhir
         if current_time - self.last_detection_time > self.word_timeout:
+            # Pastikan current_sentence adalah string
+            if not isinstance(self.current_sentence, str):
+                self.current_sentence = ""
+
             # Tambahkan kata ke kalimat
             if self.current_sentence:
-                self.current_sentence += " " + word
+                self.current_sentence += " " + str(word)
             else:
-                self.current_sentence = word
+                self.current_sentence = str(word)
 
             # Tambahkan ke riwayat kata yang terdeteksi
             self.detected_words.append({
@@ -150,9 +154,14 @@ class SIBIStreamlitDetector:
 
     def get_sentence_info(self):
         """Dapatkan informasi kalimat saat ini dan riwayat kata"""
+        # Pastikan current_sentence adalah string dan perbaiki jika bukan
+        if not isinstance(self.current_sentence, str):
+            self.current_sentence = str(self.current_sentence) if self.current_sentence else ""
+
+        sentence_str = self.current_sentence if self.current_sentence else ""
         return {
-            'sentence': self.current_sentence,
-            'word_count': len(self.current_sentence.split()) if self.current_sentence else 0,
+            'sentence': sentence_str,
+            'word_count': len(sentence_str.split()) if sentence_str else 0,
             'last_words': list(self.detected_words)[-5:] if self.detected_words else []
         }
 
@@ -160,7 +169,7 @@ class SIBIStreamlitDetector:
         """
         Gambar informasi prediksi pada frame dengan tampilan yang kompak
         """
-        height, width = frame.shape[:2]
+        width = frame.shape[1]
 
         # Gambar bounding box jika tersedia
         if bbox is not None:
@@ -192,7 +201,10 @@ class SIBIStreamlitDetector:
             cv2.putText(frame, f"{confidence:.2f}",
                        (15, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-            # Teks kalimat yang kompak
+            # Teks kalimat yang kompak - pastikan current_sentence adalah string
+            if not isinstance(self.current_sentence, str):
+                self.current_sentence = str(self.current_sentence) if self.current_sentence else ""
+
             sentence_text = self.current_sentence if self.current_sentence else "..."
             if len(sentence_text) > 25:  # Pemotongan yang lebih pendek
                 sentence_text = sentence_text[:22] + "..."
@@ -210,6 +222,10 @@ class SIBIStreamlitDetector:
 
             # Tetap tampilkan kalimat jika tersedia - versi kompak
             if self.current_sentence:
+                # Pastikan current_sentence adalah string
+                if not isinstance(self.current_sentence, str):
+                    self.current_sentence = str(self.current_sentence) if self.current_sentence else ""
+
                 sentence_text = self.current_sentence
                 if len(sentence_text) > 20:
                     sentence_text = sentence_text[:17] + "..."
@@ -225,7 +241,7 @@ class SIBIStreamlitDetector:
 
 @st.cache_resource
 def load_detector():
-    """Muat detektor dengan caching - menggunakan model sibi11sv1.pt terbaru"""
+    """Muat detektor dengan caching - menggunakan model sibi11mv1.pt terbaru"""
     try:
         return SIBIStreamlitDetector()
     except Exception as e:
@@ -291,7 +307,7 @@ def main():
         "Ambang Batas Confidence",
         min_value=0.0,
         max_value=1.0,
-        value=0.5,
+        value=0.35,
         step=0.05,
         help="Sesuaikan sensitivitas deteksi"
     )
@@ -309,9 +325,9 @@ def main():
 
     stable_threshold = st.sidebar.slider(
         "Ambang Batas Stabilitas",
-        min_value=2,
+        min_value=0,
         max_value=10,
-        value=3,
+        value=2,
         step=1,
         help="Jumlah deteksi konsisten yang diperlukan untuk menambah kata"
     )
@@ -330,10 +346,20 @@ def main():
     if 'sentence_history' not in st.session_state:
         st.session_state.sentence_history = []
 
+    # Inisialisasi session state untuk tracking tab dan kamera
+    if 'main_tab_active' not in st.session_state:
+        st.session_state.main_tab_active = 'tab1'
+    if 'camera_active' not in st.session_state:
+        st.session_state.camera_active = False
+
     # Tab interface utama
-    tab1, tab2, tab3, tab4 = st.tabs(["📷 Deteksi Langsung", "📁 Upload Gambar", "🎬 Video Demo", "ℹ️ Tentang"])
+    tab1, tab2, tab3 = st.tabs(["📷 Deteksi Langsung", "🎬 Video Demo", "ℹ️ Tentang"])
     
     with tab1:
+        # Set tab utama aktif
+        st.session_state.main_tab_active = 'tab1'
+        st.session_state.camera_active = False  # Matikan kamera upload saat di tab1
+
         st.header("📷 Deteksi Kamera Langsung")
         st.markdown("**Deteksi SIBI real-time dengan pembangunan kalimat menggunakan WebRTC**")
 
@@ -478,91 +504,11 @@ def main():
             """)
 
 
-
     with tab2:
-        st.header("📁 Upload Gambar")
-        st.markdown("Upload gambar yang berisi bahasa isyarat SIBI")
+        # Set tab utama aktif dan matikan kamera
+        st.session_state.main_tab_active = 'tab2'
+        st.session_state.camera_active = False
 
-        uploaded_file = st.file_uploader(
-            "Pilih file gambar",
-            type=['png', 'jpg', 'jpeg'],
-            help="Upload gambar untuk deteksi SIBI"
-        )
-        
-        if uploaded_file is not None:
-            # Muat dan proses gambar
-            image = Image.open(uploaded_file)
-            image_array = np.array(image)
-
-            # Proses gambar
-            result_image, prediction, confidence = process_image(
-                detector, image_array, confidence_threshold
-            )
-
-            # Tampilkan hasil dengan gambar yang lebih kecil
-            col1, col2 = st.columns(2)
-
-            with col1:
-                st.subheader("Gambar yang Diupload")
-                st.image(image, width=300)
-
-            with col2:
-                st.subheader("Hasil Deteksi")
-                st.image(result_image, width=300)
-
-            # Tampilan hasil
-            if prediction and confidence > confidence_threshold:
-                st.success(f"**Prediksi:** {prediction}")
-                st.info(f"**Confidence:** {confidence:.2%}")
-                st.progress(confidence)
-
-                # Tombol tambah ke kalimat
-                if st.button("➕ Tambah ke Kalimat", key="add_to_sentence_upload"):
-                    detector.add_word_to_sentence(prediction)
-                    st.success(f"'{prediction}' berhasil ditambahkan ke kalimat!")
-                    st.rerun()
-
-                # Fungsi download
-                result_pil = Image.fromarray(result_image)
-                buf = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-                result_pil.save(buf.name)
-
-                with open(buf.name, 'rb') as f:
-                    st.download_button(
-                        label="📥 Download Hasil",
-                        data=f.read(),
-                        file_name=f"sibi_detection_{int(time.time())}.png",
-                        mime="image/png"
-                    )
-
-                os.unlink(buf.name)
-            else:
-                st.warning("Tidak ada deteksi di atas ambang batas")
-                if prediction:
-                    st.info(f"Confidence rendah: {prediction} ({confidence:.2%})")
-
-            # Tampilkan kalimat saat ini
-            sentence_info = detector.get_sentence_info()
-            if sentence_info['sentence']:
-                st.subheader("📝 Kalimat Saat Ini")
-                st.success(f"**Kalimat:** {sentence_info['sentence']}")
-                st.info(f"**Jumlah Kata:** {sentence_info['word_count']}")
-
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("💾 Simpan Kalimat", key="save_sentence_upload"):
-                        st.session_state.sentence_history.append({
-                            'sentence': sentence_info['sentence'],
-                            'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
-                            'word_count': sentence_info['word_count']
-                        })
-                        st.success("Kalimat berhasil disimpan!")
-                with col2:
-                    if st.button("🗑️ Hapus Kalimat", key="clear_sentence_upload"):
-                        detector.clear_sentence()
-                        st.rerun()
-    
-    with tab3:
         st.header("🎬 Video Demonstrasi SIBI")
         st.markdown("**Pelajari cara melakukan setiap isyarat dengan menonton video demonstrasi di bawah ini:**")
 
@@ -617,7 +563,11 @@ def main():
                     except Exception:
                         st.warning(f"Video '{word}' tidak dapat dimuat")
 
-    with tab4:
+    with tab3:
+        # Set tab utama aktif dan matikan kamera
+        st.session_state.main_tab_active = 'tab3'
+        st.session_state.camera_active = False
+
         st.header("ℹ️ Tentang Detektor SIBI")
 
         st.markdown("""
@@ -634,7 +584,7 @@ def main():
         - **🌐 Kompatibel Cloud** - Bekerja di aplikasi Streamlit yang di-deploy dengan HTTPS
 
         ### 🔧 Stack Teknologi
-        - **Model**: Ultralytics YOLO v8 untuk deteksi SIBI (sibi11sv1.pt - Versi Terbaru)
+        - **Model**: Ultralytics YOLO v8 untuk deteksi SIBI (sibi11mv1.pt - Versi Terbaru)
         - **Backend**: PyTorch untuk inferensi deep learning
         - **Frontend**: Streamlit dengan streamlit-webrtc untuk akses kamera
         - **Computer Vision**: OpenCV untuk pemrosesan gambar
@@ -670,7 +620,7 @@ def main():
             with col1:
                 st.write(f"**Device**: {detector.device}")
                 st.write(f"**Tipe Model**: Ultralytics YOLO")
-                st.write(f"**Versi Model**: sibi11sv1.pt")
+                st.write(f"**Versi Model**: sibi11mv1.pt")
                 st.write(f"**Kelas**: {len(detector.model.names)} kelas")
             with col2:
                 st.write(f"**Ambang Batas Confidence**: {confidence_threshold}")
