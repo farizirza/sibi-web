@@ -11,11 +11,8 @@ from collections import deque
 import threading
 import queue
 
-# Import streamlit-webrtc components
 from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 import av
-
-# Page config
 st.set_page_config(
     page_title="Deteksi Bahasa Isyarat SIBI Real-time",
     page_icon="🤟",
@@ -23,7 +20,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# WebRTC configuration for better connectivity
 RTC_CONFIGURATION = RTCConfiguration({
     "iceServers": [
         {"urls": ["stun:stun.l.google.com:19302"]},
@@ -33,81 +29,55 @@ RTC_CONFIGURATION = RTCConfiguration({
 
 class SIBIStreamlitDetector:
     def __init__(self, model_path='models/sibi11sv1.pt'):
-        """
-        Inisialisasi detektor SIBI untuk Streamlit dengan kemampuan membangun kalimat
-        """
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-        # Inisialisasi model
         self.model = None
         self.current_prediction = None
         self.current_confidence = 0.0
 
-        # Muat model
         try:
             self.model = YOLO(model_path)
         except Exception as e:
             st.error(f"Gagal memuat model: {e}")
             raise Exception(f"Gagal memuat model: {e}")
 
-        # Parameter deteksi
         self.confidence_threshold = 0.5
         self.prediction_history = []
         self.history_size = 5
-
-        # Fitur pembangunan kalimat
-        self.detected_words = deque(maxlen=50)  # Simpan 50 kata terakhir yang terdeteksi
+        self.detected_words = deque(maxlen=50)
         self.current_sentence = ""
         self.last_detection_time = 0
-        self.word_timeout = 1.5  # detik antara kata
+        self.word_timeout = 1.5
         self.stable_detection_count = 0
-        self.stable_threshold = 3  # butuh 3 deteksi stabil untuk menambah kata
-
-        # Variabel thread-safe untuk WebRTC
+        self.stable_threshold = 3
         self.lock = threading.Lock()
         self.latest_frame = None
         self.detection_results = queue.Queue(maxsize=10)
 
     def predict(self, frame):
-        """
-        Buat prediksi pada frame menggunakan YOLO
-        """
         try:
             results = self.model(frame, verbose=False)
-            
+
             if len(results) > 0 and len(results[0].boxes) > 0:
-                # Ambil deteksi terbaik
                 boxes = results[0].boxes
                 confidences = boxes.conf.cpu().numpy()
                 classes = boxes.cls.cpu().numpy()
-
-                # Ambil deteksi dengan confidence tertinggi
                 best_idx = confidences.argmax()
                 predicted = int(classes[best_idx])
                 confidence = float(confidences[best_idx])
-
-                # Ambil bounding box
                 bbox = boxes.xyxy[best_idx].cpu().numpy()
-
                 return predicted, confidence, bbox
             else:
                 return None, 0.0, None
-        
         except Exception:
             return None, 0.0, None
     
     def smooth_predictions(self, prediction, confidence):
-        """
-        Haluskan prediksi menggunakan riwayat untuk mengurangi noise
-        """
         if confidence > self.confidence_threshold:
             self.prediction_history.append(prediction)
 
-        # Simpan hanya prediksi terbaru
         if len(self.prediction_history) > self.history_size:
             self.prediction_history.pop(0)
 
-        # Kembalikan prediksi yang paling sering muncul jika riwayat cukup
         if len(self.prediction_history) >= 3:
             most_common = max(set(self.prediction_history),
                             key=self.prediction_history.count)
@@ -116,24 +86,17 @@ class SIBIStreamlitDetector:
         return prediction if confidence > self.confidence_threshold else None
 
     def add_word_to_sentence(self, word):
-        """
-        Tambahkan kata yang terdeteksi ke kalimat dengan logika waktu
-        """
         current_time = time.time()
 
-        # Cek apakah waktu yang cukup telah berlalu sejak deteksi terakhir
         if current_time - self.last_detection_time > self.word_timeout:
-            # Pastikan current_sentence adalah string
             if not isinstance(self.current_sentence, str):
                 self.current_sentence = ""
 
-            # Tambahkan kata ke kalimat
             if self.current_sentence:
                 self.current_sentence += " " + str(word)
             else:
                 self.current_sentence = str(word)
 
-            # Tambahkan ke riwayat kata yang terdeteksi
             self.detected_words.append({
                 'word': word,
                 'timestamp': current_time,
@@ -146,14 +109,11 @@ class SIBIStreamlitDetector:
         return False
 
     def clear_sentence(self):
-        """Bersihkan kalimat saat ini"""
         self.current_sentence = ""
         self.detected_words.clear()
         self.stable_detection_count = 0
 
     def get_sentence_info(self):
-        """Dapatkan informasi kalimat saat ini dan riwayat kata"""
-        # Pastikan current_sentence adalah string dan perbaiki jika bukan
         if not isinstance(self.current_sentence, str):
             self.current_sentence = str(self.current_sentence) if self.current_sentence else ""
 
@@ -165,73 +125,51 @@ class SIBIStreamlitDetector:
         }
 
     def draw_info(self, frame, prediction, confidence, bbox=None):
-        """
-        Gambar informasi prediksi pada frame dengan tampilan yang kompak
-        """
         width = frame.shape[1]
 
-        # Gambar bounding box jika tersedia
         if bbox is not None:
             x1, y1, x2, y2 = bbox.astype(int)
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-        # Gambar info prediksi dengan kotak yang lebih kecil
         if prediction is not None and confidence > self.confidence_threshold:
-            # Ambil nama kelas dari model
             class_names = self.model.names
             label = class_names.get(prediction, f"Kelas_{prediction}")
 
-            # Cek deteksi stabil untuk pembangunan kalimat
             if label == self.current_prediction:
                 self.stable_detection_count += 1
             else:
                 self.stable_detection_count = 1
 
-            # Tambahkan ke kalimat jika cukup stabil
             if self.stable_detection_count >= self.stable_threshold:
                 self.add_word_to_sentence(label)
 
-            # Background yang lebih kecil untuk teks
             cv2.rectangle(frame, (10, 10), (min(width-10, 350), 90), (0, 0, 0), -1)
+            cv2.putText(frame, f"{label}", (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(frame, f"{confidence:.2f}", (15, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-            # Teks prediksi saat ini - ukuran font lebih kecil
-            cv2.putText(frame, f"{label}",
-                       (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            cv2.putText(frame, f"{confidence:.2f}",
-                       (15, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
-            # Teks kalimat yang kompak - pastikan current_sentence adalah string
             if not isinstance(self.current_sentence, str):
                 self.current_sentence = str(self.current_sentence) if self.current_sentence else ""
 
             sentence_text = self.current_sentence if self.current_sentence else "..."
-            if len(sentence_text) > 25:  # Pemotongan yang lebih pendek
+            if len(sentence_text) > 25:
                 sentence_text = sentence_text[:22] + "..."
-            cv2.putText(frame, f"K: {sentence_text}",
-                       (15, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+            cv2.putText(frame, f"K: {sentence_text}", (15, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
 
-            # Update prediksi saat ini untuk tampilan
             self.current_prediction = label
             self.current_confidence = confidence
         else:
-            # Kotak "Tidak ada deteksi" yang lebih kecil
             cv2.rectangle(frame, (10, 10), (200, 60), (0, 0, 0), -1)
-            cv2.putText(frame, "Tidak terdeteksi",
-                       (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            cv2.putText(frame, "Tidak terdeteksi", (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
-            # Tetap tampilkan kalimat jika tersedia - versi kompak
             if self.current_sentence:
-                # Pastikan current_sentence adalah string
                 if not isinstance(self.current_sentence, str):
                     self.current_sentence = str(self.current_sentence) if self.current_sentence else ""
 
                 sentence_text = self.current_sentence
                 if len(sentence_text) > 20:
                     sentence_text = sentence_text[:17] + "..."
-                cv2.putText(frame, f"K: {sentence_text}",
-                           (15, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+                cv2.putText(frame, f"K: {sentence_text}", (15, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
 
-            # Reset counter stabilitas
             self.stable_detection_count = 0
             self.current_prediction = None
             self.current_confidence = 0.0
@@ -240,7 +178,6 @@ class SIBIStreamlitDetector:
 
 @st.cache_resource
 def load_detector():
-    """Muat detektor dengan caching - menggunakan model sibi11sv1.pt terbaru"""
     try:
         return SIBIStreamlitDetector()
     except Exception as e:
@@ -248,22 +185,12 @@ def load_detector():
         return None
 
 def video_frame_callback(frame, detector):
-    """
-    Fungsi callback untuk memproses frame video dari WebRTC
-    """
     img = frame.to_ndarray(format="bgr24")
-
-    # Balik frame secara horizontal untuk efek cermin
     img = cv2.flip(img, 1)
-
-    # Buat prediksi
     prediction, confidence, bbox = detector.predict(img)
     smoothed_prediction = detector.smooth_predictions(prediction, confidence)
-
-    # Gambar informasi pada frame
     annotated_frame = detector.draw_info(img, smoothed_prediction, confidence, bbox)
 
-    # Simpan hasil terbaru untuk update UI (thread-safe)
     try:
         detector.detection_results.put_nowait({
             'prediction': smoothed_prediction,
@@ -271,40 +198,24 @@ def video_frame_callback(frame, detector):
             'timestamp': time.time()
         })
     except queue.Full:
-        pass  # Lewati jika queue penuh
+        pass
 
-    # Konversi kembali ke av.VideoFrame
     return av.VideoFrame.from_ndarray(annotated_frame, format="bgr24")
 
 def process_image(detector, image_array, confidence_threshold):
-    """Proses gambar dan kembalikan hasil"""
-    # Konversi RGB ke BGR untuk OpenCV
     image_bgr = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
-
-    # Buat prediksi
     prediction, confidence, bbox = detector.predict(image_bgr)
     smoothed_prediction = detector.smooth_predictions(prediction, confidence)
-
-    # Update threshold confidence
     detector.confidence_threshold = confidence_threshold
-
-    # Gambar informasi pada frame
     annotated_frame = detector.draw_info(image_bgr, smoothed_prediction, confidence, bbox)
-
-    # Konversi kembali ke RGB untuk tampilan
     annotated_frame_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
-
     return annotated_frame_rgb, smoothed_prediction, confidence
 
 def process_image_detailed(detector, image_array, confidence_threshold):
-    """Proses gambar dan kembalikan hasil detail untuk upload"""
-    # Konversi RGB ke BGR untuk OpenCV
     image_bgr = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
 
     try:
-        # Buat prediksi dengan model YOLO
         results = detector.model(image_bgr, verbose=False)
-
         detections = []
         annotated_frame = image_bgr.copy()
 
@@ -314,8 +225,7 @@ def process_image_detailed(detector, image_array, confidence_threshold):
             classes = boxes.cls.cpu().numpy()
             bboxes = boxes.xyxy.cpu().numpy()
 
-            # Ambil semua deteksi yang memenuhi threshold
-            for i, (cls, conf, bbox) in enumerate(zip(classes, confidences, bboxes)):
+            for cls, conf, bbox in zip(classes, confidences, bboxes):
                 if conf > confidence_threshold:
                     class_name = detector.model.names.get(int(cls), f"Kelas_{int(cls)}")
                     detections.append({
@@ -325,32 +235,25 @@ def process_image_detailed(detector, image_array, confidence_threshold):
                         'bbox': bbox
                     })
 
-                    # Gambar bounding box
                     x1, y1, x2, y2 = bbox.astype(int)
                     cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-                    # Gambar label
                     label = f"{class_name}: {conf:.2f}"
                     cv2.putText(annotated_frame, label, (x1, y1-10),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
-        # Konversi kembali ke RGB untuk tampilan
         annotated_frame_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
-
         return annotated_frame_rgb, detections
 
-    except Exception as e:
-        # Jika ada error, kembalikan gambar asli dan list kosong
+    except Exception:
         return cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB), []
 
 def main():
-    st.title("🤟 Deteksi Bahasa Isyarat SIBI Real-time")
-    st.markdown("**Posisikan tangan Anda di depan kamera untuk mendeteksi bahasa isyarat SIBI dan membangun kalimat.**")
+    st.title("Deteksi Bahasa Isyarat SIBI")
+    st.markdown("Aplikasi untuk mendeteksi bahasa isyarat SIBI dan membangun kalimat secara otomatis.")
 
-    # Pengaturan sidebar
-    st.sidebar.header("⚙️ Pengaturan")
+    st.sidebar.header("Pengaturan")
     confidence_threshold = st.sidebar.slider(
-        "Ambang Batas Confidence",
+        "Tingkat Kepercayaan",
         min_value=0.0,
         max_value=1.0,
         value=0.35,
@@ -358,8 +261,7 @@ def main():
         help="Sesuaikan sensitivitas deteksi"
     )
 
-    # Pengaturan pembangunan kalimat
-    st.sidebar.subheader("📝 Pembangunan Kalimat")
+    st.sidebar.subheader("Pengaturan Kalimat")
     word_timeout = st.sidebar.slider(
         "Jeda Antar Kata (detik)",
         min_value=1.0,
@@ -370,7 +272,7 @@ def main():
     )
 
     stable_threshold = st.sidebar.slider(
-        "Ambang Batas Stabilitas",
+        "Stabilitas Deteksi",
         min_value=0,
         max_value=10,
         value=2,
@@ -378,59 +280,54 @@ def main():
         help="Jumlah deteksi konsisten yang diperlukan untuk menambah kata"
     )
 
-    # Muat detektor
     detector = load_detector()
     if detector is None:
         st.stop()
 
-    # Update pengaturan detektor
     detector.confidence_threshold = confidence_threshold
     detector.word_timeout = word_timeout
     detector.stable_threshold = stable_threshold
 
-    # Inisialisasi session state
     if 'sentence_history' not in st.session_state:
         st.session_state.sentence_history = []
 
-    # Inisialisasi session state untuk tracking tab dan kamera
     if 'main_tab_active' not in st.session_state:
         st.session_state.main_tab_active = 'tab1'
     if 'camera_active' not in st.session_state:
         st.session_state.camera_active = False
 
-    # Tab interface utama
-    tab1, tab2, tab3, tab4 = st.tabs(["📷 Deteksi Langsung", "📁 Upload Gambar", "🎬 Video Demo", "ℹ️ Tentang"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Deteksi Langsung", "Upload Gambar", "Video Demo", "Tentang"])
     
     with tab1:
         # Set tab utama aktif
         st.session_state.main_tab_active = 'tab1'
         st.session_state.camera_active = False  # Matikan kamera upload saat di tab1
 
-        st.header("📷 Deteksi Kamera Langsung")
-        st.markdown("**Deteksi SIBI real-time dengan pembangunan kalimat menggunakan WebRTC**")
+        st.header("Deteksi Kamera Langsung")
+        st.markdown("Deteksi SIBI secara real-time menggunakan kamera dan bangun kalimat otomatis")
 
         # Tombol kontrol
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("🗑️ Hapus Kalimat"):
+            if st.button("Hapus Kalimat"):
                 detector.clear_sentence()
                 st.rerun()
         with col2:
             # Tombol simpan kalimat
             sentence_info = detector.get_sentence_info()
-            if sentence_info['sentence'] and st.button("💾 Simpan Kalimat"):
+            if sentence_info['sentence'] and st.button("Simpan Kalimat"):
                 st.session_state.sentence_history.append({
                     'sentence': sentence_info['sentence'],
                     'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
                     'word_count': sentence_info['word_count']
                 })
-                st.success("Kalimat berhasil disimpan ke riwayat!")
+                st.success("Kalimat berhasil disimpan!")
 
         # Buat layout dengan kamera yang lebih kecil
         col1, col2 = st.columns([1, 2])  # Kamera lebih kecil (1/3), info lebih besar (2/3)
 
         with col1:
-            st.subheader("📹 Kamera")
+            st.subheader("Kamera")
             # Buat WebRTC streamer dengan styling khusus
             webrtc_ctx = webrtc_streamer(
                 key="sibi-detection",
@@ -448,10 +345,10 @@ def main():
             )
         
         with col2:
-            st.subheader("📊 Hasil Deteksi")
+            st.subheader("Hasil Deteksi")
             detection_placeholder = st.empty()
 
-            st.subheader("📝 Kalimat Saat Ini")
+            st.subheader("Kalimat Saat Ini")
             sentence_placeholder = st.empty()
 
         # Update hasil deteksi secara real-time
@@ -467,29 +364,29 @@ def main():
                     with detection_placeholder.container():
                         if result['prediction'] and result['confidence'] > confidence_threshold:
                             # Tampilan metrik yang kompak
-                            st.metric("🎯 Isyarat Saat Ini", result['prediction'])
+                            st.metric("Isyarat Saat Ini", result['prediction'])
 
                             col1, col2 = st.columns(2)
                             with col1:
-                                st.metric("📊 Confidence", f"{result['confidence']:.1%}")
+                                st.metric("Confidence", f"{result['confidence']:.1%}")
                             with col2:
-                                st.metric("⚡ Stabilitas", f"{detector.stable_detection_count}/{detector.stable_threshold}")
+                                st.metric("Stabilitas", f"{detector.stable_detection_count}/{detector.stable_threshold}")
                         else:
-                            st.warning("⌛ Menunggu deteksi...")
+                            st.warning("Menunggu deteksi...")
 
                     # Update tampilan kalimat
                     sentence_info = detector.get_sentence_info()
                     with sentence_placeholder.container():
                         if sentence_info['sentence']:
-                            st.success(f"**📝 Kalimat:** {sentence_info['sentence']}")
-                            st.info(f"**📊 Kata:** {sentence_info['word_count']}")
+                            st.success(f"**Kalimat:** {sentence_info['sentence']}")
+                            st.info(f"**Jumlah Kata:** {sentence_info['word_count']}")
 
                             # Tampilkan beberapa kata terakhir
                             if sentence_info['last_words']:
                                 recent_words = [w['word'] for w in sentence_info['last_words']]
                                 st.text(f"Terbaru: {' → '.join(recent_words)}")
                         else:
-                            st.info("💡 Tunjukkan isyarat SIBI untuk mulai membangun kalimat")
+                            st.info("Tunjukkan isyarat SIBI untuk mulai membangun kalimat")
                             
                 except queue.Empty:
                     time.sleep(0.1)
@@ -517,7 +414,7 @@ def main():
 
         # Riwayat kalimat
         if st.session_state.sentence_history:
-            st.subheader("📚 Riwayat Kalimat")
+            st.subheader("Riwayat Kalimat")
             for i, entry in enumerate(reversed(st.session_state.sentence_history[-10:])):  # Show last 10
                 with st.expander(f"Kalimat {len(st.session_state.sentence_history)-i}: {entry['sentence'][:50]}..."):
                     st.write(f"**Kalimat Lengkap:** {entry['sentence']}")
@@ -525,28 +422,22 @@ def main():
                     st.write(f"**Waktu:** {entry['timestamp']}")
 
         # Instruksi
-        with st.expander("📖 Cara Menggunakan Deteksi Langsung"):
+        with st.expander("Cara Menggunakan"):
             st.markdown("""
-            **Instruksi untuk Deteksi Langsung:**
+            **Langkah-langkah:**
             1. Klik "Start" untuk mengaktifkan kamera
-            2. Izinkan akses kamera saat diminta oleh browser
-            3. Posisikan tangan Anda dengan jelas di depan kamera
-            4. Tahan setiap isyarat SIBI dengan stabil selama beberapa detik
-            5. Sistem akan otomatis menambahkan isyarat yang terdeteksi untuk membangun kalimat
+            2. Izinkan akses kamera saat diminta
+            3. Posisikan tangan dengan jelas di depan kamera
+            4. Tahan isyarat SIBI dengan stabil
+            5. Sistem akan otomatis menambahkan kata ke kalimat
             6. Gunakan "Hapus Kalimat" untuk memulai dari awal
-            7. Gunakan "Simpan Kalimat" untuk menyimpan kalimat yang sudah selesai
+            7. Gunakan "Simpan Kalimat" untuk menyimpan hasil
 
             **Tips:**
-            - Pastikan pencahayaan yang baik untuk deteksi yang lebih akurat
-            - Tahan isyarat dengan stabil sesuai durasi ambang batas stabilitas
-            - Sesuaikan ambang batas confidence dan stabilitas di sidebar
-            - Jeda antar kata mengontrol jarak waktu antara kata
-            - Coba bangun kalimat dengan kosakata yang ditampilkan di bawah
-
-            **Kompatibilitas Browser:**
-            - Bekerja paling baik dengan Chrome, Firefox, Safari, dan Edge
-            - Memerlukan HTTPS untuk akses kamera di production
-            - Mungkin perlu refresh jika kamera tidak mau mulai
+            - Pastikan pencahayaan yang baik
+            - Tahan isyarat dengan stabil
+            - Sesuaikan pengaturan di sidebar jika diperlukan
+            - Refresh halaman jika kamera tidak mau mulai
             """)
 
     with tab2:
@@ -554,25 +445,25 @@ def main():
         st.session_state.main_tab_active = 'tab2'
         st.session_state.camera_active = False
 
-        st.header("📁 Upload Gambar untuk Deteksi SIBI")
-        st.markdown("**Upload gambar yang berisi isyarat SIBI untuk dianalisis dan ditambahkan ke kalimat**")
+        st.header("Upload Gambar")
+        st.markdown("Upload gambar yang berisi isyarat SIBI untuk dianalisis")
 
         # Tombol kontrol kalimat
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("🗑️ Hapus Kalimat", key="clear_sentence_upload"):
+            if st.button("Hapus Kalimat", key="clear_sentence_upload"):
                 detector.clear_sentence()
                 st.rerun()
         with col2:
             # Tombol simpan kalimat
             sentence_info = detector.get_sentence_info()
-            if sentence_info['sentence'] and st.button("💾 Simpan Kalimat", key="save_sentence_upload"):
+            if sentence_info['sentence'] and st.button("Simpan Kalimat", key="save_sentence_upload"):
                 st.session_state.sentence_history.append({
                     'sentence': sentence_info['sentence'],
                     'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
                     'word_count': sentence_info['word_count']
                 })
-                st.success("Kalimat berhasil disimpan ke riwayat!")
+                st.success("Kalimat berhasil disimpan!")
 
         # Upload file
         uploaded_file = st.file_uploader(
@@ -586,13 +477,13 @@ def main():
             col1, col2 = st.columns([1, 1])
 
             with col1:
-                st.subheader("📷 Gambar yang Diupload")
+                st.subheader("Gambar Original")
                 # Tampilkan gambar asli
                 image = Image.open(uploaded_file)
-                st.image(image, caption="Gambar Original", use_container_width=True)
+                st.image(image, caption="Gambar yang diupload", use_container_width=True)
 
             with col2:
-                st.subheader("🎯 Hasil Deteksi")
+                st.subheader("Hasil Deteksi")
 
                 # Proses gambar
                 image_array = np.array(image)
@@ -620,7 +511,7 @@ def main():
                                 st.write(f"**{idx+1}. {detected_word}** - Confidence: {confidence:.1%}")
                             with col2:
                                 # Tombol untuk menambahkan kata ke kalimat
-                                if st.button(f"➕ Tambah", key=f"add_word_{idx}"):
+                                if st.button(f"Tambah", key=f"add_word_{idx}"):
                                     # Tambahkan kata langsung ke kalimat tanpa logika waktu
                                     if not isinstance(detector.current_sentence, str):
                                         detector.current_sentence = ""
@@ -637,12 +528,12 @@ def main():
                                         'confidence': confidence
                                     })
 
-                                    st.success(f"✅ Kata '{detected_word}' berhasil ditambahkan ke kalimat!")
+                                    st.success(f"Kata '{detected_word}' berhasil ditambahkan!")
                                     st.rerun()
 
                     # Tombol untuk menambahkan semua kata sekaligus
                     if len(detections) > 1:
-                        if st.button("➕ Tambahkan Semua Kata ke Kalimat", key="add_all_words"):
+                        if st.button("Tambahkan Semua Kata", key="add_all_words"):
                             words_added = []
                             for detection in detections:
                                 detected_word = detection['class_name']
@@ -665,22 +556,22 @@ def main():
                                 })
                                 words_added.append(detected_word)
 
-                            st.success(f"✅ Semua kata berhasil ditambahkan: {', '.join(words_added)}")
+                            st.success(f"Semua kata berhasil ditambahkan: {', '.join(words_added)}")
                             st.rerun()
                 else:
-                    st.warning("⚠️ Tidak ada isyarat SIBI yang terdeteksi dengan confidence yang cukup")
-                    st.info("💡 Coba upload gambar dengan pencahayaan yang lebih baik atau posisi tangan yang lebih jelas")
+                    st.warning("Tidak ada isyarat SIBI yang terdeteksi dengan confidence yang cukup")
+                    st.info("Coba upload gambar dengan pencahayaan yang lebih baik atau posisi tangan yang lebih jelas")
 
         # Tampilkan kalimat saat ini
-        st.subheader("📝 Kalimat Saat Ini")
+        st.subheader("Kalimat Saat Ini")
         sentence_info = detector.get_sentence_info()
         if sentence_info['sentence']:
             # Tampilkan kalimat dalam kotak yang menonjol
             st.markdown(f"""
             <div style="background-color: #e8f5e8; padding: 15px; border-radius: 10px; border-left: 5px solid #4CAF50;">
-                <h4 style="color: #2e7d32; margin: 0;">📝 Kalimat Anda:</h4>
+                <h4 style="color: #2e7d32; margin: 0;">Kalimat Anda:</h4>
                 <p style="font-size: 18px; margin: 10px 0; color: #1b5e20;"><strong>{sentence_info['sentence']}</strong></p>
-                <small style="color: #4caf50;">📊 Jumlah Kata: {sentence_info['word_count']}</small>
+                <small style="color: #4caf50;">Jumlah Kata: {sentence_info['word_count']}</small>
             </div>
             """, unsafe_allow_html=True)
 
@@ -693,7 +584,7 @@ def main():
 
         # Riwayat kalimat untuk tab upload
         if st.session_state.sentence_history:
-            st.subheader("📚 Riwayat Kalimat")
+            st.subheader("Riwayat Kalimat")
             for i, entry in enumerate(reversed(st.session_state.sentence_history[-5:])):  # Show last 5
                 with st.expander(f"Kalimat {len(st.session_state.sentence_history)-i}: {entry['sentence'][:30]}..."):
                     st.write(f"**Kalimat Lengkap:** {entry['sentence']}")
@@ -701,31 +592,18 @@ def main():
                     st.write(f"**Waktu:** {entry['timestamp']}")
 
         # Instruksi penggunaan
-        with st.expander("📖 Cara Menggunakan Upload Gambar"):
+        with st.expander("Cara Menggunakan"):
             st.markdown("""
-            **Instruksi untuk Upload Gambar:**
-            1. Klik "Browse files" untuk memilih gambar dari perangkat Anda
-            2. Pilih gambar yang berisi isyarat SIBI dengan jelas
-            3. Tunggu sistem memproses dan mendeteksi isyarat
-            4. Jika terdeteksi, klik tombol "Tambahkan ke Kalimat" untuk menambahkan kata
-            5. Ulangi proses untuk kata-kata berikutnya
-            6. Gunakan "Hapus Kalimat" untuk memulai dari awal
-            7. Gunakan "Simpan Kalimat" untuk menyimpan kalimat yang sudah selesai
+            **Langkah-langkah:**
+            1. Pilih gambar yang berisi isyarat SIBI
+            2. Tunggu sistem mendeteksi isyarat
+            3. Klik tombol "Tambah" untuk menambahkan kata ke kalimat
+            4. Gunakan "Simpan Kalimat" jika sudah selesai
 
-            **Tips untuk Hasil Terbaik:**
-            - Pastikan gambar memiliki pencahayaan yang baik
-            - Posisi tangan harus jelas dan tidak terpotong
-            - Latar belakang yang kontras dengan tangan
-            - Resolusi gambar yang cukup (minimal 300x300 pixel)
-            - Format gambar: PNG, JPG, atau JPEG
-            - Hindari gambar yang blur atau buram
-
-            **Keuntungan Upload Gambar:**
-            - Dapat menganalisis gambar berkualitas tinggi
-            - Tidak memerlukan kamera real-time
-            - Bisa menggunakan foto yang sudah ada
-            - Kontrol penuh atas penambahan kata ke kalimat
-            - Cocok untuk pembelajaran dan latihan
+            **Tips:**
+            - Gunakan gambar dengan pencahayaan yang baik
+            - Pastikan tangan terlihat jelas
+            - Format yang didukung: PNG, JPG, JPEG
             """)
 
     with tab3:
@@ -733,14 +611,14 @@ def main():
         st.session_state.main_tab_active = 'tab3'
         st.session_state.camera_active = False
 
-        st.header("🎬 Video Demonstrasi SIBI")
-        st.markdown("**Pelajari cara melakukan setiap isyarat dengan menonton video demonstrasi di bawah ini:**")
+        st.header("Video Demonstrasi")
+        st.markdown("Pelajari cara melakukan setiap isyarat SIBI")
 
         # Peringatan untuk performa
-        st.info("💡 **Tips**: Tutup tab ini saat menggunakan deteksi langsung untuk performa yang lebih baik.")
+        st.info("Tips: Tutup tab ini saat menggunakan deteksi langsung untuk performa yang lebih baik.")
 
         # Kategori kata utama
-        with st.expander("📚 Kata Utama (Main Words)", expanded=True):
+        with st.expander("Kata Utama", expanded=True):
             main_words = [
                 "berangkat", "terbang", "toko", "banyak", "pesawat", "antar", "bisa", "simpan",
                 "taksi", "henti", "kunci", "besok", "kamar", "berapa", "tunjuk", "halte",
@@ -769,7 +647,7 @@ def main():
                                 st.warning(f"Video '{word}' tidak dapat dimuat")
 
         # Kategori kata penghubung
-        with st.expander("🔗 Kata Imbuhan/Hubung (Connector Words)"):
+        with st.expander("Kata Penghubung"):
             connector_words = ["ke", "di", "kan", "ber", "dan"]
 
             # Tampilkan video penghubung dalam format grid
@@ -792,132 +670,78 @@ def main():
         st.session_state.main_tab_active = 'tab4'
         st.session_state.camera_active = False
 
-        st.header("ℹ️ Tentang Detektor SIBI")
+        st.header("Tentang Aplikasi")
 
         st.markdown("""
-        ### 🤟 Sistem Isyarat Bahasa Indonesia (SIBI)
+        ### Apa itu SIBI?
 
-        Aplikasi Streamlit ini menyediakan deteksi SIBI canggih dengan kemampuan membangun kalimat menggunakan WebRTC untuk akses kamera real-time.
+        SIBI (Sistem Isyarat Bahasa Indonesia) adalah bahasa isyarat resmi yang digunakan di Indonesia untuk komunikasi dengan teman-teman tuli dan tunarungu.
 
-        ### ✨ Fitur
-        - **🎥 Deteksi Langsung WebRTC** - Streaming video real-time yang bekerja di aplikasi yang sudah di-deploy
-        - **� Upload Gambar** - Analisis gambar isyarat SIBI dengan kontrol manual penambahan kata
-        - **�📝 Pembangunan Kalimat** - Konstruksi otomatis dari kata ke kalimat dengan placeholder
-        - **📚 Riwayat Kalimat** - Simpan dan kelola kalimat yang terdeteksi
-        - **⚙️ Pengaturan Lanjutan** - Parameter stabilitas dan timing yang dapat dikonfigurasi
-        - **📸 Berbagai Metode Input** - Kamera langsung dan upload file gambar
-        - **🌐 Kompatibel Cloud** - Bekerja di aplikasi Streamlit yang di-deploy dengan HTTPS
+        ### Tentang Aplikasi Ini
 
-        ### 🔧 Stack Teknologi
-        - **Model**: Ultralytics YOLO v11s untuk deteksi SIBI
-        - **Backend**: PyTorch untuk inferensi deep learning
-        - **Frontend**: Streamlit dengan streamlit-webrtc untuk akses kamera
-        - **Computer Vision**: OpenCV untuk pemrosesan gambar
-        - **Pemrosesan Real-time**: WebRTC untuk streaming video latensi rendah
+        Aplikasi ini dibuat untuk membantu Anda belajar dan menggunakan bahasa isyarat SIBI. Dengan teknologi kecerdasan buatan, aplikasi dapat mengenali gerakan tangan Anda dan mengubahnya menjadi kata-kata.
 
-        ### 📊 Fitur Deteksi
-        - **Penghalusan Prediksi** - Mengurangi noise dengan filtering berbasis riwayat
-        - **Ambang Batas Confidence** - Sensitivitas deteksi yang dapat disesuaikan
-        - **Kontrol Stabilitas** - Memerlukan deteksi konsisten sebelum menambah kata
-        - **Visualisasi Bounding Box** - Umpan balik visual untuk isyarat yang terdeteksi
-        - **Statistik Real-time** - Metrik confidence dan stabilitas langsung
+        ### Fitur Utama
+        - **Deteksi Langsung** - Gunakan kamera untuk deteksi real-time
+        - **Upload Gambar** - Analisis gambar isyarat yang sudah ada
+        - **Pembangunan Kalimat** - Kata-kata yang terdeteksi otomatis disusun menjadi kalimat
+        - **Riwayat Kalimat** - Simpan kalimat yang sudah dibuat
+        - **Video Pembelajaran** - Lihat contoh gerakan untuk setiap kata
 
-        ### 🎯 Cara Kerja
-        1. **Pengambilan Video**: WebRTC streaming video langsung dari browser Anda
-        2. **Deteksi**: Model YOLO mengidentifikasi isyarat SIBI secara real-time
-        3. **Penghalusan**: Beberapa deteksi konsisten mengurangi false positive
-        4. **Stabilitas**: Kata ditambahkan hanya setelah periode deteksi yang stabil
-        5. **Pembangunan Kalimat**: Kata yang terdeteksi otomatis digabungkan dengan logika timing
-        6. **Riwayat**: Kalimat yang selesai disimpan untuk review dan ekspor
+        ### Cara Kerja
 
-        ### 🌐 Keuntungan Deployment
-        - **Kompatibilitas Browser**: Bekerja di berbagai browser modern
-        - **Tanpa Dependensi Lokal**: Akses kamera melalui standar web
-        - **Dukungan HTTPS**: Akses kamera yang aman di production
-        - **Cross-Platform**: Bekerja di desktop dan perangkat mobile
+        Aplikasi ini menggunakan teknologi kecerdasan buatan untuk mengenali gerakan tangan Anda. Ketika Anda menunjukkan isyarat SIBI di depan kamera atau mengupload gambar, sistem akan:
+
+        1. **Menangkap gambar** dari kamera atau file yang diupload
+        2. **Menganalisis gerakan tangan** menggunakan model AI yang sudah dilatih
+        3. **Mengenali isyarat** dan mengubahnya menjadi kata
+        4. **Menyusun kalimat** dari kata-kata yang terdeteksi
+
+        ### Tips Penggunaan
+
+        **Untuk Deteksi Langsung:**
+        - Pastikan pencahayaan ruangan cukup terang
+        - Posisikan tangan dengan jelas di depan kamera
+        - Tahan gerakan isyarat selama beberapa detik
+
+        **Untuk Upload Gambar:**
+        - Gunakan gambar dengan kualitas yang baik
+        - Pastikan tangan terlihat jelas dan tidak terpotong
+        - Hindari latar belakang yang terlalu ramai
+        ### Kosakata yang Tersedia
+
+        Aplikasi ini dapat mengenali berbagai kata dalam bahasa isyarat SIBI, termasuk:
+
+        **Kata Dasar:** saya, kamu, mau, makan, jalan, hotel, kamar, toko, dan lainnya
+
+        **Kata Kerja:** berangkat, terbang, antar, simpan, henti, bantu, panggil, dan lainnya
+
+        **Kata Penghubung:** ke, di, kan, ber, dan
+
+        Lihat tab "Video Demo" untuk mempelajari cara melakukan setiap isyarat.
         """)
 
-        # Informasi model
-        if detector and detector.model:
-            st.subheader("🔍 Informasi Model")
-
-            col1, col2 = st.columns(2)
-            with col1:
-                st.write(f"**Device**: {detector.device}")
-                st.write(f"**Tipe Model**: Ultralytics YOLO")
-                st.write(f"**Versi Model**: sibi11sv1.pt")
-                st.write(f"**Kelas**: {len(detector.model.names)} kelas")
-            with col2:
-                st.write(f"**Ambang Batas Confidence**: {confidence_threshold}")
-                st.write(f"**Jeda Antar Kata**: {detector.word_timeout}s")
-                st.write(f"**Ambang Batas Stabilitas**: {detector.stable_threshold}")
-
-            # Tampilkan informasi kosakata baru
-            st.info("""
-            **🆕 Kosakata Baru Ditambahkan**: berangkat, terbang, toko, banyak, pesawat, antar, bisa, simpan, taksi, henti, ber, kunci, besok, kamar, dan, berapa, tunjuk, kan, halte, belok, kiri, bantu, panggil, perlu
-            """)
-
-            # Tampilkan kelas yang tersedia
-            with st.expander("📋 Lihat Semua Kelas SIBI yang Tersedia"):
-                # Tampilkan kelas dengan cara yang lebih terorganisir
-                classes = list(detector.model.names.items())
-                cols = st.columns(3)
-                for i, (idx, name) in enumerate(classes):
-                    with cols[i % 3]:
-                        st.write(f"**{idx}**: {name}")
-
         # Tips penggunaan
-        with st.expander("💡 Tips Penggunaan"):
+        with st.expander("Tips Penggunaan"):
             st.markdown("""
             **Untuk Hasil Terbaik:**
-            - Pastikan kondisi pencahayaan yang baik
+            - Pastikan pencahayaan yang baik
             - Posisikan tangan dengan jelas di depan kamera
-            - Tahan isyarat dengan stabil sesuai durasi ambang batas stabilitas
-            - Gunakan posisi tangan yang konsisten
-            - Sesuaikan ambang batas confidence berdasarkan lingkungan
+            - Tahan isyarat dengan stabil
+            - Sesuaikan pengaturan confidence jika diperlukan
 
             **Tips Membangun Kalimat:**
-            - Tunggu jeda antar kata di antara isyarat yang berbeda
+            - Tunggu jeda antar kata
             - Gunakan "Hapus Kalimat" untuk memulai dari awal
-            - Simpan kalimat penting ke riwayat
-            - Sesuaikan ambang batas stabilitas untuk akurasi vs kecepatan
-            - Coba kosakata baru untuk kalimat yang lebih kompleks
-
-            **🆕 Kosakata Baru yang Tersedia:**
-            - Transportasi: berangkat, terbang, pesawat, taksi, halte
-            - Tempat & Objek: toko, kamar, kunci
-            - Aksi: antar, bisa, simpan, henti, tunjuk, bantu, panggil
-            - Deskriptor: banyak, besok, berapa, kiri
-            - Penghubung: dan, kan, ber, perlu
+            - Simpan kalimat yang sudah selesai ke riwayat
 
             **Pengaturan Browser:**
-            - Izinkan permission kamera saat diminta
-            - Gunakan Chrome, Firefox, Safari, atau Edge untuk kompatibilitas terbaik
-            - Pastikan koneksi internet yang stabil untuk streaming yang lancar
+            - Izinkan akses kamera saat diminta
+            - Gunakan browser modern (Chrome, Firefox, Safari, Edge)
             - Refresh halaman jika kamera tidak mau mulai
             """)
 
-        # Informasi teknis
-        with st.expander("⚡ Informasi Teknis"):
-            st.markdown("""
-            **Implementasi WebRTC:**
-            - Streaming video peer-to-peer real-time
-            - Pipeline pemrosesan latensi rendah
-            - Optimisasi frame rate otomatis
-            - Penanganan hasil deteksi yang thread-safe
 
-            **Optimisasi Performa:**
-            - Pemrosesan video async
-            - Update hasil berbasis queue
-            - Penanganan frame yang efisien memori
-            - Akselerasi GPU jika tersedia
-
-            **Persyaratan Deployment:**
-            - HTTPS diperlukan untuk akses kamera di production
-            - Package streamlit-webrtc untuk fungsionalitas WebRTC
-            - Browser modern dengan dukungan WebRTC
-            - Koneksi internet yang stabil
-            """)
 
 if __name__ == "__main__":
     main()

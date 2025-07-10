@@ -1,169 +1,96 @@
-# 🤟 SIBI Sign Language Detector
+# Deteksi Bahasa Isyarat SIBI
 
-Aplikasi web untuk deteksi bahasa isyarat SIBI (Sistem Isyarat Bahasa Indonesia) dengan dua versi interface: Flask dan Streamlit.
+Aplikasi web untuk mendeteksi bahasa isyarat SIBI (Sistem Isyarat Bahasa Indonesia) menggunakan kecerdasan buatan.
 
-## ✨ Fitur
+## Apa itu SIBI?
 
-- 📷 **Real-time Camera Detection** - Deteksi langsung menggunakan kamera
-- 📁 **Image Upload** - Upload gambar untuk dianalisis
-- 🎯 **High Accuracy** - Menggunakan model YOLO yang sudah dilatih
-- 📊 **Confidence Score** - Tampilan tingkat kepercayaan prediksi
-- 🎨 **User-friendly Interface** - Interface web yang mudah digunakan
-- 📱 **Responsive Design** - Dapat diakses dari berbagai device
-- 🔄 **Dual Interface** - Flask (local) dan Streamlit (cloud deployment)
+SIBI adalah bahasa isyarat resmi Indonesia yang digunakan untuk berkomunikasi dengan teman-teman tuli dan tunarungu. Aplikasi ini membantu Anda belajar dan menggunakan SIBI dengan teknologi AI.
 
-## Persyaratan Sistem
+## Fitur Utama
 
-- Python 3.7+
-- Webcam/kamera
-- Model Ultralytics YOLO yang sudah dilatih (`models/sibiv3.pt`)
+- **Deteksi Langsung** - Gunakan kamera untuk deteksi real-time
+- **Upload Gambar** - Analisis gambar isyarat yang sudah ada
+- **Pembangunan Kalimat** - Kata-kata yang terdeteksi otomatis disusun menjadi kalimat
+- **Video Pembelajaran** - Lihat contoh gerakan untuk setiap kata
+- **Riwayat Kalimat** - Simpan kalimat yang sudah dibuat
 
-## 🚀 Quick Start
+## Cara Menggunakan
 
-### Option 1: Flask Version (Local Development)
+### Persiapan
 
-1. Install dependencies:
+1. Pastikan Python 3.7+ sudah terinstall
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Pastikan model AI ada di folder `models/sibi11sv1.pt`
 
-```bash
-pip install -r requirements.txt
-```
-
-2. Pastikan model YOLO ada di folder `models/sibiv3.pt`
-
-3. Jalankan Flask app:
+### Menjalankan Aplikasi
 
 ```bash
-python sibi_web_detector.py
+python -m streamlit run streamlit_app.py
 ```
 
-4. Buka browser ke `http://localhost:5000`
+Buka browser ke `http://localhost:8501`
 
-### Option 2: Streamlit Version (Cloud Deployment)
+### Menggunakan Fitur
 
-1. Install dependencies:
+**Deteksi Langsung:**
 
-```bash
-pip install -r requirements.txt
-```
+1. Klik tab "Deteksi Langsung"
+2. Izinkan akses kamera
+3. Tunjukkan isyarat SIBI di depan kamera
+4. Sistem akan otomatis mengenali dan menyusun kalimat
 
-2. Pastikan model YOLO ada di folder `models/sibiv3.pt`
+**Upload Gambar:**
 
-3. Jalankan Streamlit app:
+1. Klik tab "Upload Gambar"
+2. Pilih gambar yang berisi isyarat SIBI
+3. Klik tombol "Tambah" untuk menambahkan kata ke kalimat
 
-```bash
-python -m streamlit run streamlit_app.py --server.headless true --server.port 8501
-```
+## Tips Penggunaan
 
-4. Buka browser ke `http://localhost:8501`
+- Pastikan pencahayaan ruangan cukup terang
+- Posisikan tangan dengan jelas di depan kamera
+- Untuk gambar, pastikan tangan tidak terpotong
+- Gunakan latar belakang yang kontras dengan tangan
 
-### 🌐 Deploy ke Streamlit Cloud
+## Kosakata yang Didukung
 
-1. **Fork/Upload ke GitHub**
+Aplikasi ini dapat mengenali berbagai kata SIBI seperti:
 
-   - Upload semua file ke repository GitHub Anda
-   - Pastikan file `models/sibiv3.pt` ada di repository
+- Kata dasar: saya, kamu, mau, makan, jalan
+- Kata kerja: berangkat, terbang, antar, simpan, bantu
+- Kata penghubung: ke, di, kan, ber, dan
 
-2. **Deploy ke Streamlit Cloud**
+Lihat tab "Video Demo" untuk mempelajari cara melakukan setiap isyarat.
 
-   - Kunjungi [share.streamlit.io](https://share.streamlit.io)
-   - Login dengan GitHub account
-   - Klik "New app"
-   - Pilih repository dan branch
-   - Set main file path: `streamlit_app.py`
-   - Klik "Deploy!"
-
-3. **Konfigurasi (Opsional)**
-   - File `packages.txt` untuk system dependencies
-   - File `.streamlit/config.toml` untuk konfigurasi UI
-   - File `requirements.txt` untuk Python dependencies
-
-## 📖 Cara Penggunaan
-
-### 📷 Flask Version (Real-time Video Stream)
-
-1. Buka browser ke `http://localhost:5000`
-2. Posisikan tangan di depan kamera
-3. Lihat hasil deteksi real-time di browser dengan video stream
-4. Klik "Stop Detector" untuk menghentikan
-
-### 📱 Streamlit Version (Real-time Detection)
-
-1. Buka browser ke `http://localhost:8501` (local) atau URL Streamlit Cloud
-2. Klik tab "Real-time Detection"
-3. Klik "🎥 Start Detection" untuk memulai real-time detection
-4. Posisikan tangan dengan gerakan SIBI di depan kamera
-5. Lihat hasil deteksi real-time dengan bounding box dan confidence score
-6. Klik "⏹️ Stop Detection" untuk menghentikan
-
-### 📁 Upload Image (Streamlit Only)
-
-1. Klik tab "Upload Image"
-2. Upload gambar yang berisi gerakan SIBI
-3. Lihat hasil analisis dan download hasil jika diperlukan
-
-## 📁 Struktur File
+## Struktur File
 
 ```
 sibiwebv2/
-├── models/
-│   └── sibiv3.pt           # Model Ultralytics YOLO
-├── .streamlit/
-│   └── config.toml         # Konfigurasi Streamlit
-├── sibi_web_detector.py    # Flask version (real-time video stream)
-├── streamlit_app.py        # Streamlit version (cloud deployment)
-├── packages.txt            # System dependencies untuk deployment
-├── requirements.txt        # Python dependencies
+├── models/sibi11sv1.pt     # Model AI untuk deteksi
+├── dataset/                # Video demonstrasi isyarat
+├── streamlit_app.py        # Aplikasi utama
+├── requirements.txt        # Dependencies Python
 └── README.md              # Dokumentasi ini
 ```
 
-## 🔧 Teknologi
+## Teknologi
 
-### Flask Version
+- **Model AI**: YOLO untuk deteksi objek
+- **Framework**: Streamlit untuk interface web
+- **Computer Vision**: OpenCV untuk pemrosesan gambar
+- **Real-time**: WebRTC untuk streaming kamera
 
-- **Backend**: Flask untuk web server
-- **Real-time**: Video streaming dengan multipart response
-- **Interface**: HTML template dengan real-time video feed
+## Kontribusi
 
-### Streamlit Version
+Jika Anda ingin berkontribusi:
 
-- **Frontend**: Streamlit untuk cloud deployment
-- **Real-time**: Real-time detection dengan camera stream (sama seperti Flask)
-- **Interface**: Start/Stop detection buttons dan image upload
-- **Deployment**: Streamlit Cloud ready
-
-### Shared Components
-
-- **Computer Vision**: OpenCV untuk image processing
-- **Deep Learning**: PyTorch + Ultralytics YOLO
-- **Model**: Same YOLO model dan inference logic
-
-## ⚙️ Settings
-
-- `confidence_threshold`: Ambang batas confidence (default: 0.7)
-- `history_size`: Ukuran history untuk smoothing (default: 5)
-- Input size model: Ubah di `transforms.Resize((224, 224))`
-- Labels: Sesuaikan dengan kelas model Anda
-
-## Troubleshooting
-
-### Kamera tidak terdeteksi
-
-- Pastikan kamera terhubung dan tidak digunakan aplikasi lain
-- Coba ubah index kamera di `cv2.VideoCapture(0)` menjadi 1 atau 2
-
-### Model tidak bisa dimuat
-
-- Pastikan file `models/sibiv3.pt` ada dan tidak corrupt
-- Periksa kompatibilitas versi PyTorch
-
-### Performa lambat
-
-- Gunakan GPU jika tersedia
-- Kurangi resolusi kamera
-- Sesuaikan ukuran detection area
+1. Fork repository ini
+2. Buat perubahan yang diperlukan
+3. Submit pull request
 
 ## Catatan
 
-- Aplikasi ini menggunakan asumsi umum untuk model deteksi bahasa isyarat
-- Sesuaikan preprocessing dan labels sesuai dengan model Anda
-- Untuk performa terbaik, gunakan pencahayaan yang baik dan background yang kontras
+Model AI (`sibi11sv1.pt`) diperlukan untuk menjalankan aplikasi. Pastikan file ini ada di folder `models/` sebelum menjalankan aplikasi.
