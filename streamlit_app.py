@@ -296,7 +296,7 @@ def main():
     if 'camera_active' not in st.session_state:
         st.session_state.camera_active = False
 
-    tab1, tab2, tab3, tab4 = st.tabs(["Deteksi Langsung", "Upload Gambar", "Video Demo"])
+    tab1, tab2, tab3 = st.tabs(["Deteksi Langsung", "Upload Gambar", "Video Demo"])
     
     with tab1:
         # Set tab utama aktif
