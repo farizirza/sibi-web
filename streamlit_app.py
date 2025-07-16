@@ -296,7 +296,7 @@ def main():
     if 'camera_active' not in st.session_state:
         st.session_state.camera_active = False
 
-    tab1, tab2, tab3, tab4 = st.tabs(["Deteksi Langsung", "Upload Gambar", "Video Demo", "Tentang"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Deteksi Langsung", "Upload Gambar", "Video Demo"])
     
     with tab1:
         # Set tab utama aktif
@@ -664,84 +664,6 @@ def main():
                             st.info(f"Video untuk '{word}' tidak ditemukan")
                     except Exception:
                         st.warning(f"Video '{word}' tidak dapat dimuat")
-
-    with tab4:
-        # Set tab utama aktif dan matikan kamera
-        st.session_state.main_tab_active = 'tab4'
-        st.session_state.camera_active = False
-
-        st.header("Tentang Aplikasi")
-
-        st.markdown("""
-        ### Apa itu SIBI?
-
-        SIBI (Sistem Isyarat Bahasa Indonesia) adalah bahasa isyarat resmi yang digunakan di Indonesia untuk komunikasi dengan teman-teman tuli dan tunarungu.
-
-        ### Tentang Aplikasi Ini
-
-        Aplikasi ini dibuat untuk membantu Anda belajar dan menggunakan bahasa isyarat SIBI. Dengan teknologi kecerdasan buatan, aplikasi dapat mengenali gerakan tangan Anda dan mengubahnya menjadi kata-kata.
-
-        ### Fitur Utama
-        - **Deteksi Langsung** - Gunakan kamera untuk deteksi real-time
-        - **Upload Gambar** - Analisis gambar isyarat yang sudah ada
-        - **Pembangunan Kalimat** - Kata-kata yang terdeteksi otomatis disusun menjadi kalimat
-        - **Riwayat Kalimat** - Simpan kalimat yang sudah dibuat
-        - **Video Pembelajaran** - Lihat contoh gerakan untuk setiap kata
-
-        ### Cara Kerja
-
-        Aplikasi ini menggunakan teknologi kecerdasan buatan untuk mengenali gerakan tangan Anda. Ketika Anda menunjukkan isyarat SIBI di depan kamera atau mengupload gambar, sistem akan:
-
-        1. **Menangkap gambar** dari kamera atau file yang diupload
-        2. **Menganalisis gerakan tangan** menggunakan model AI yang sudah dilatih
-        3. **Mengenali isyarat** dan mengubahnya menjadi kata
-        4. **Menyusun kalimat** dari kata-kata yang terdeteksi
-
-        ### Tips Penggunaan
-
-        **Untuk Deteksi Langsung:**
-        - Pastikan pencahayaan ruangan cukup terang
-        - Posisikan tangan dengan jelas di depan kamera
-        - Tahan gerakan isyarat selama beberapa detik
-
-        **Untuk Upload Gambar:**
-        - Gunakan gambar dengan kualitas yang baik
-        - Pastikan tangan terlihat jelas dan tidak terpotong
-        - Hindari latar belakang yang terlalu ramai
-        ### Kosakata yang Tersedia
-
-        Aplikasi ini dapat mengenali berbagai kata dalam bahasa isyarat SIBI, termasuk:
-
-        **Kata Dasar:** saya, kamu, mau, makan, jalan, hotel, kamar, toko, dan lainnya
-
-        **Kata Kerja:** berangkat, terbang, antar, simpan, henti, bantu, panggil, dan lainnya
-
-        **Kata Penghubung:** ke, di, kan, ber, dan
-
-        Lihat tab "Video Demo" untuk mempelajari cara melakukan setiap isyarat.
-        """)
-
-        # Tips penggunaan
-        with st.expander("Tips Penggunaan"):
-            st.markdown("""
-            **Untuk Hasil Terbaik:**
-            - Pastikan pencahayaan yang baik
-            - Posisikan tangan dengan jelas di depan kamera
-            - Tahan isyarat dengan stabil
-            - Sesuaikan pengaturan confidence jika diperlukan
-
-            **Tips Membangun Kalimat:**
-            - Tunggu jeda antar kata
-            - Gunakan "Hapus Kalimat" untuk memulai dari awal
-            - Simpan kalimat yang sudah selesai ke riwayat
-
-            **Pengaturan Browser:**
-            - Izinkan akses kamera saat diminta
-            - Gunakan browser modern (Chrome, Firefox, Safari, Edge)
-            - Refresh halaman jika kamera tidak mau mulai
-            """)
-
-
 
 if __name__ == "__main__":
     main()
