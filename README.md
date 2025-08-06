@@ -23,7 +23,7 @@ SIBI adalah bahasa isyarat resmi Indonesia yang digunakan untuk berkomunikasi de
    ```bash
    pip install -r requirements.txt
    ```
-3. Pastikan model AI ada di folder `models/sibi11sv1.pt`
+3. Pastikan model AI ada di folder `models/sibiv11m100epoch.pt`
 
 ### Menjalankan Aplikasi
 
@@ -69,7 +69,7 @@ Lihat tab "Video Demo" untuk mempelajari cara melakukan setiap isyarat.
 
 ```
 sibiwebv2/
-├── models/sibi11sv1.pt     # Model AI untuk deteksi
+├── models/sibiv11m100epoch.pt     # Model AI untuk deteksi
 ├── dataset/                # Video demonstrasi isyarat
 ├── streamlit_app.py        # Aplikasi utama
 ├── requirements.txt        # Dependencies Python
@@ -93,4 +93,4 @@ Jika Anda ingin berkontribusi:
 
 ## Catatan
 
-Model AI (`sibi11sv1.pt`) diperlukan untuk menjalankan aplikasi. Pastikan file ini ada di folder `models/` sebelum menjalankan aplikasi.
+Model AI (`sibiv11m100epoch.pt`) diperlukan untuk menjalankan aplikasi. Pastikan file ini ada di folder `models/` sebelum menjalankan aplikasi.

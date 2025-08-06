@@ -5,7 +5,6 @@ import numpy as np
 from ultralytics import YOLO
 import time
 from PIL import Image
-import tempfile
 import os
 from collections import deque
 import threading
@@ -28,7 +27,7 @@ RTC_CONFIGURATION = RTCConfiguration({
 })
 
 class SIBIStreamlitDetector:
-    def __init__(self, model_path='models/sibi11sv1.pt'):
+    def __init__(self, model_path='models/sibiv11m100epoch.pt'):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model = None
         self.current_prediction = None
